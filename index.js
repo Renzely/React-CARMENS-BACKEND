@@ -714,6 +714,112 @@ app.post("/inventory/grouped", async (req, res) => {
   }
 });
 
+// routes/saveNext.js
+app.post("/saveNext", async (req, res) => {
+  try {
+    const { email, merchandiser, outlet, date, versions } = req.body;
+
+    // Get latest doc for this outlet
+    const prevDoc = await Inventory.findOne({ outlet }).sort({ createdAt: -1 });
+    const prevUsage = prevDoc ? prevDoc.usageCount : -1;
+    const nextUsage = prevUsage + 1;
+    const denom = nextUsage + 1;
+
+    const cats = ["DAIRY", "ICECREAM", "MVP"];
+    const outVersions = {};
+
+    for (const cat of cats) {
+      const incoming = versions?.[cat]?.Carried ?? [];
+      const prevCarried = prevDoc?.versions?.[cat]?.Carried ?? [];
+      const prevIndex = new Map(prevCarried.map((s) => [s.skuCode, s]));
+
+      const computedCarried = incoming.map((sku) => {
+        const thisOfftake = Number(sku.offtake || 0);
+        const prev = prevIndex.get(sku.skuCode);
+
+        let prevTotal = 0;
+        if (prev) {
+          const pt = Number(prev.totalOfftake || 0);
+          prevTotal = pt > 0 ? pt : Number(prev.offtake || 0);
+        }
+
+        const newTotal = prevTotal + thisOfftake;
+        const avg = denom > 0 ? newTotal / denom : 0;
+
+        return {
+          ...sku,
+          code: sku.code || prev?.code || "",
+          totalOfftake: newTotal,
+          avgOfftake: Number(avg.toFixed(2)),
+          suggestedOrder: Math.max(
+            0,
+            Number(avg.toFixed(2)) - Number(sku.soQty || 0)
+          ),
+        };
+      });
+
+      outVersions[cat] = {
+        Carried: computedCarried,
+        "Not Carried": versions?.[cat]?.["Not Carried"] ?? [],
+        Delisted: versions?.[cat]?.Delisted ?? [],
+      };
+    }
+
+    // 1️⃣ Save new doc
+    const newDoc = new Inventory({
+      email,
+      merchandiser,
+      outlet,
+      date,
+      versions: outVersions,
+      locked: false, // new doc stays open
+      usageCount: nextUsage,
+    });
+
+    await newDoc.save();
+
+    // 2️⃣ Lock the previous one if exists
+    if (prevDoc?._id) {
+      await Inventory.updateOne(
+        { _id: prevDoc._id },
+        { $set: { locked: true } }
+      );
+      console.log("Locked prev doc:", prevDoc._id.toString());
+    }
+
+    res.json({ success: true, id: newDoc._id, usageCount: nextUsage });
+  } catch (err) {
+    console.error("❌ Error saving next week:", err);
+    res.status(500).json({ error: "Failed to save next week inventory" });
+  }
+});
+
+// ✅ Get latest inventory for an outlet
+app.get("/getLatest", async (req, res) => {
+  try {
+    const { outlet } = req.query;
+
+    if (!outlet) {
+      return res.status(400).json({ error: "Missing outlet parameter" });
+    }
+
+    // Fetch the latest doc for this outlet (sorted by date descending)
+    const doc = await Inventory.findOne({ outlet }).sort({ date: -1 }).lean();
+
+    if (!doc) {
+      return res.json({
+        doc: null,
+        message: "No inventory found for this outlet",
+      });
+    }
+
+    res.json({ doc });
+  } catch (err) {
+    console.error("❌ Error fetching latest inventory:", err);
+    res.status(500).json({ error: "Failed to fetch latest inventory" });
+  }
+});
+
 app.get("/", (req, res) => {
   res.json({ status: "started" });
 });
@@ -885,12 +991,20 @@ app.post("/export-inventory-data", async (req, res) => {
                   ? "NC"
                   : "Delisted",
               delivery: status === "Carried" ? sku.deliveryPCS ?? 0 : "",
+              RTVNo: status === "Carried" ? sku.rtvNo || "" : "",
               RTV: status === "Carried" ? sku.rtvPCS ?? 0 : "",
+              RTVReason: status === "Carried" ? sku.rtvReason || "" : "",
               ending: status === "Carried" ? sku.endingPCS ?? 0 : "",
               offtake: status === "Carried" ? sku.offtake ?? 0 : "",
+              avgOfftake: status === "Carried" ? sku.avgOfftake ?? "" : "",
               harvest: Array.isArray(sku.harvest) ? sku.harvest : [],
               expiry: Array.isArray(sku.expiry) ? sku.expiry : [],
-              oos: status === "Carried" ? sku.oos ?? "" : "",
+              oos:
+                status === "Carried"
+                  ? sku.oos === 0
+                    ? ""
+                    : sku.oos ?? ""
+                  : "",
             });
           });
         });

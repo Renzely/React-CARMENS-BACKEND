@@ -15,10 +15,37 @@ const skuSchema = new mongoose.Schema(
     code: String,
     beginningPCS: Number,
     deliveryPCS: Number,
+    rtvNo: {
+      type: String,
+      default: "",
+    },
     rtvPCS: Number,
+    rtvReason: {
+      type: String,
+      default: "",
+    },
     endingPCS: Number,
     offtake: Number,
     inventoryDays: Number,
+
+    // 🔹 SO fields
+    avgOfftake: {
+      type: Number,
+      default: 0,
+    },
+    totalOfftake: {
+      type: Number,
+      default: 0,
+    },
+    soQty: {
+      type: Number,
+      default: 0,
+    },
+    suggestedOrder: {
+      type: Number,
+      default: 0,
+    },
+
     harvest: [entrySchema],
     expiry: [entrySchema],
     oos: {
@@ -46,21 +73,29 @@ const versionSchema = new mongoose.Schema(
   { _id: false }
 );
 
-const groupedInventorySchema = new mongoose.Schema({
-  email: String,
-  date: String,
-  merchandiser: String,
-  outlet: String,
-  locked: {
-    type: Boolean,
-    default: false,
+const groupedInventorySchema = new mongoose.Schema(
+  {
+    email: String,
+    date: String,
+    merchandiser: String,
+    outlet: String,
+    locked: {
+      type: Boolean,
+      default: false,
+    },
+    usageCount: {
+      // 🔥 track how many times this doc has been used
+      type: Number,
+      default: 0,
+    },
+    versions: {
+      DAIRY: versionSchema,
+      ICECREAM: versionSchema,
+      MVP: versionSchema,
+    },
   },
-  versions: {
-    DAIRY: versionSchema,
-    ICECREAM: versionSchema,
-    MVP: versionSchema,
-  },
-});
+  { timestamps: true }
+);
 
 const Inventory = mongoose.model("inventoryProcess", groupedInventorySchema);
 module.exports = Inventory;
