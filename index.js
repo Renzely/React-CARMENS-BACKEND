@@ -674,7 +674,7 @@ app.post("/attendance/time-out", async (req, res) => {
 
 app.post("/inventory/grouped", async (req, res) => {
   try {
-    const { email, date, merchandiser, outlet, versions } = req.body;
+    const { email, week, date, merchandiser, outlet, versions } = req.body;
 
     if (!email) {
       return res
@@ -695,6 +695,7 @@ app.post("/inventory/grouped", async (req, res) => {
     // Save the full structure as-is
     const newInventory = await Inventory.create({
       email,
+      week,
       date,
       merchandiser,
       outlet,
@@ -717,13 +718,25 @@ app.post("/inventory/grouped", async (req, res) => {
 // routes/saveNext.js
 app.post("/saveNext", async (req, res) => {
   try {
-    const { email, merchandiser, outlet, date, versions } = req.body;
+    const { email, merchandiser, outlet, week, date, versions } = req.body;
 
-    // Get latest doc for this outlet
+    // 1) Find the earliest (first) and most recent (prev) docs for this outlet
+    const firstDoc = await Inventory.findOne({ outlet }).sort({ createdAt: 1 });
     const prevDoc = await Inventory.findOne({ outlet }).sort({ createdAt: -1 });
-    const prevUsage = prevDoc ? prevDoc.usageCount : -1;
-    const nextUsage = prevUsage + 1;
-    const denom = nextUsage + 1;
+
+    // 2) Anchor = first inventory date (or current date if no firstDoc yet)
+    const baseDate = firstDoc?.date ? new Date(firstDoc.date) : new Date(date);
+
+    // normalize to midnight
+    baseDate.setHours(0, 0, 0, 0);
+    const currentDate = new Date(date);
+    currentDate.setHours(0, 0, 0, 0);
+
+    // 3) days elapsed since first inventory (so first day = 1)
+    const diffMs = currentDate - baseDate;
+    const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
+    const usageCount = totalDays > 0 ? totalDays : 1;
+    const denom = usageCount; // will be used for averaging
 
     const cats = ["DAIRY", "ICECREAM", "MVP"];
     const outVersions = {};
@@ -734,17 +747,19 @@ app.post("/saveNext", async (req, res) => {
       const prevIndex = new Map(prevCarried.map((s) => [s.skuCode, s]));
 
       const computedCarried = incoming.map((sku) => {
-        const thisOfftake = Number(sku.offtake || 0);
+        const thisOfftake = Number(sku.offtake || 0); // current week offtake sent from frontend
         const prev = prevIndex.get(sku.skuCode);
 
+        // previous accumulated totalOfftake (or fallback to prev.offtake)
         let prevTotal = 0;
         if (prev) {
           const pt = Number(prev.totalOfftake || 0);
           prevTotal = pt > 0 ? pt : Number(prev.offtake || 0);
         }
 
+        // accumulate and compute avg using days-based denom
         const newTotal = prevTotal + thisOfftake;
-        const avg = denom > 0 ? newTotal / denom : 0;
+        const avg = newTotal / denom;
 
         return {
           ...sku,
@@ -765,29 +780,37 @@ app.post("/saveNext", async (req, res) => {
       };
     }
 
-    // 1️⃣ Save new doc
+    // 4) Save new doc including anchor (firstDate) and usageCount
     const newDoc = new Inventory({
       email,
       merchandiser,
       outlet,
+      week,
       date,
       versions: outVersions,
-      locked: false, // new doc stays open
-      usageCount: nextUsage,
+      locked: false,
+      usageCount,
+      firstDate: baseDate.toISOString(),
     });
 
     await newDoc.save();
 
-    // 2️⃣ Lock the previous one if exists
+    // Lock previous doc if exists
     if (prevDoc?._id) {
       await Inventory.updateOne(
         { _id: prevDoc._id },
         { $set: { locked: true } }
       );
-      console.log("Locked prev doc:", prevDoc._id.toString());
     }
 
-    res.json({ success: true, id: newDoc._id, usageCount: nextUsage });
+    // Return authoritative values so frontend and backend match
+    res.json({
+      success: true,
+      id: newDoc._id,
+      usageCount,
+      firstDate: baseDate.toISOString(),
+      versions: outVersions,
+    });
   } catch (err) {
     console.error("❌ Error saving next week:", err);
     res.status(500).json({ error: "Failed to save next week inventory" });
