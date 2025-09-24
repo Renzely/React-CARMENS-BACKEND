@@ -28,6 +28,15 @@ const skuSchema = new mongoose.Schema(
     offtake: Number,
     inventoryDays: Number,
 
+    adjustPlus: {
+      type: Number,
+      default: 0,
+    },
+    adjustMinus: {
+      type: Number,
+      default: 0,
+    },
+
     // 🔹 SO fields
     avgOfftake: {
       type: Number,
@@ -76,6 +85,7 @@ const versionSchema = new mongoose.Schema(
 const groupedInventorySchema = new mongoose.Schema(
   {
     email: String,
+    week: Number,
     date: String,
     merchandiser: String,
     outlet: String,
