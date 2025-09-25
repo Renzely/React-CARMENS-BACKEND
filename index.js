@@ -1019,6 +1019,8 @@ app.post("/export-inventory-data", async (req, res) => {
               RTVReason: status === "Carried" ? sku.rtvReason || "" : "",
               ending: status === "Carried" ? sku.endingPCS ?? 0 : "",
               offtake: status === "Carried" ? sku.offtake ?? 0 : "",
+              adjustPlus: status === "Carried" ? sku.adjustPlus ?? 0 : "",
+              adjustMinus: status === "Carried" ? sku.adjustMinus ?? 0 : "",
               avgOfftake: status === "Carried" ? sku.avgOfftake ?? "" : "",
               harvest: Array.isArray(sku.harvest) ? sku.harvest : [],
               expiry: Array.isArray(sku.expiry) ? sku.expiry : [],
