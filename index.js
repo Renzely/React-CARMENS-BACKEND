@@ -1001,6 +1001,7 @@ app.post("/export-inventory-data", async (req, res) => {
             formatted.push({
               count: formatted.length + 1,
               date: record.date,
+              week: record.week,
               fullname: record.merchandiser || "N/A",
               outlet: record.outlet,
               category: versionKey,
